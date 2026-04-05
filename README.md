@@ -1,6 +1,6 @@
 # ticketcli
 
-A multi-backend ticket CLI with pluggable handlers for Jira Cloud, Jira Server, ClickUp, Azure DevOps Boards, and a local mock backend.
+A multi-backend ticket CLI with pluggable handlers for Jira Cloud, Jira Server, GitHub Issues, ClickUp, Azure DevOps Boards, and a local mock backend.
 
 ## Install
 
@@ -106,6 +106,28 @@ Each entry in `targets.json` is a named target.  The `ticket_system` field selec
   }
 }
 ```
+
+### GitHub Issues
+
+```json
+"myrepo": {
+  "ticket_system": "github",
+  "project_base": "GH",
+  "owner": "my-org",
+  "repo": "my-repo",
+  "list_issues_max_results": 100,
+  "auth": {
+    "token_env": "GITHUB_TOKEN"
+  }
+}
+```
+
+> **Auth:** create a [fine-grained personal access token](https://github.com/settings/tokens?type=beta) with at least *Issues (Read & Write)* permission on the target repository and export it:
+> ```bash
+> export GITHUB_TOKEN="ghp_..."
+> ```
+>
+> `base_url` defaults to `https://api.github.com` and can be overridden for GitHub Enterprise Server instances.
 
 ### Local mock (for testing)
 
@@ -263,7 +285,7 @@ ticketcli close -i PROJ-42 -s Closed     # use a different target status
 
 ## Pinned comments
 
-Jira Cloud/Server supports pinning comments (via comment properties).  ClickUp uses the 📌 pushpin emoji reaction.  The local mock backend persists pin state in its JSON file.
+Jira Cloud/Server supports pinning comments (via comment properties).  ClickUp uses the 📌 pushpin emoji reaction.  GitHub uses native issue-comment pinning (via GraphQL API).  The local mock backend persists pin state in its JSON file.
 
 Pinned comments are always shown in `ticketcli show` output (regardless of the 5-comment limit) and tagged with **`[pinned]`**.
 
@@ -389,6 +411,8 @@ ticketcli cache clear   # remove all cached completion data
 - Azure DevOps work item type defaults to `Task`; set `"work_item_type"` in the target config to use `Bug`, `User Story`, etc.
 - Tab-completion for issue keys shows summaries as hints while typing (zsh/fish); the hint is stripped once the typed text matches a full key. Flags are hidden while completing values so only real candidates appear.
 - Migration uses reverse user-mapping: source system ID → human alias → destination system ID.
+- GitHub Issues only have two states (`open` / `closed`).  Common close-status names (`Done`, `Resolved`, `Complete`, etc.) are automatically mapped to `closed`.  Worklogs are marked as **not available** since GitHub has no built-in time-tracking.
+- GitHub Issues do not support first-class file attachments; `upload`, `download`, and `delete-attachment` are not available.  Embed files via markdown links in the issue body instead.
 - When you add a comment, upload, or download an attachment on an issue whose status is idle (Open, To Do, Planned, Backlog, etc.), the CLI suggests transitioning it to "In Progress".  Press **Enter** to accept or **n** to skip.  Your preferred in-progress status is cached per target (30-day TTL) so you are only asked to pick once.
 
 ## Shell completion

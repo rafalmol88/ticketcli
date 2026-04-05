@@ -151,6 +151,7 @@ class Issue:
     attachments: List[Attachment] = field(default_factory=list)
     comments: List[Comment] = field(default_factory=list)
     worklogs: List[Worklog] = field(default_factory=list)
+    worklogs_available: bool = True
     links: List[IssueLink] = field(default_factory=list)
     changelog: List[ChangelogEntry] = field(default_factory=list)
     raw: Any = field(default=None, repr=False)
@@ -170,6 +171,7 @@ class Issue:
             attachments=[Attachment.from_dict(a) for a in data.get("attachments", [])],
             comments=[Comment.from_dict(c) for c in data.get("comments", [])],
             worklogs=[Worklog.from_dict(w) for w in data.get("worklogs", [])],
+            worklogs_available=bool(data.get("worklogs_available", True)),
             links=[IssueLink.from_dict(l) for l in data.get("links", [])],
             changelog=[ChangelogEntry.from_dict(e) for e in data.get("changelog", [])],
         )
@@ -188,6 +190,7 @@ class Issue:
             "attachments": [a.to_dict() for a in self.attachments],
             "comments": [c.to_dict() for c in self.comments],
             "worklogs": [w.to_dict() for w in self.worklogs],
+            "worklogs_available": self.worklogs_available,
             "links": [l.to_dict() for l in self.links],
             "changelog": [e.to_dict() for e in self.changelog],
         }

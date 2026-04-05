@@ -62,7 +62,9 @@ def render_issue(issue: Issue, target_name: str | None = None) -> str:
         "Worklogs:",
     ]
 
-    if issue.worklogs:
+    if not issue.worklogs_available:
+        lines.append("- not available (this backend does not support time tracking)")
+    elif issue.worklogs:
         for w in issue.worklogs:
             lines.append(f"- [{_human_date(w.created_at)}] {w.author} ({w.time_spent or '-'})")
             lines.append(f"  {w.body}")

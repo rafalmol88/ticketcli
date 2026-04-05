@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from ticketcli.handlers.azuredevops import AzureDevOpsHandler
 from ticketcli.handlers.clickup import ClickUpHandler
+from ticketcli.handlers.github import GitHubHandler
 from ticketcli.handlers.jira_cloud import JiraCloudHandler
 from ticketcli.handlers.jira_server import JiraServerHandler
 from ticketcli.handlers.localmock import LocalMockHandler
@@ -19,6 +20,8 @@ def build_handler(target_name: str, target_config: dict, user_mappings: dict):
         "azuredevops": AzureDevOpsHandler,
         "azure_devops": AzureDevOpsHandler,
         "azure": AzureDevOpsHandler,
+        "github": GitHubHandler,
+        "github_issues": GitHubHandler,
         "localmock": LocalMockHandler,
     }
     handler_cls = registry.get(system_name)
