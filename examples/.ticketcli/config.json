@@ -1,0 +1,5 @@
+{
+  "editor": "vim",
+  "default_target": "sandbox",
+  "require_explicit_target": false
+}

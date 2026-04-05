@@ -1,0 +1,15 @@
+{
+  "issues": [
+    {
+      "id": "941b8198-a4c1-49a9-87d9-9eafa9551346",
+      "key": "SBX-1",
+      "summary": "Test issue",
+      "description": "Hello",
+      "status": "Open",
+      "assignee": null,
+      "attachments": [],
+      "comments": [],
+      "worklogs": []
+    }
+  ]
+}

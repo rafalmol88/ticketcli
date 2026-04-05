@@ -1,0 +1,40 @@
+{
+  "projectx": {
+    "ticket_system": "jira_cloud",
+    "project_base": "PROJECTX",
+    "base_url": "https://your-company.atlassian.net",
+    "project_id": "10001",
+    "issue_type_name": "Task",
+    "auth": {
+      "email_env": "JIRA_EMAIL",
+      "token_env": "JIRA_TOKEN"
+    }
+  },
+  "legacyjira": {
+    "ticket_system": "jira_server",
+    "project_base": "OPS",
+    "base_url": "https://jira.example.internal",
+    "project_key": "OPS",
+    "issue_type_name": "Task",
+    "auth": {
+      "username_env": "JIRA_SERVER_USER",
+      "password_env": "JIRA_SERVER_PASSWORD"
+    }
+  },
+  "clickops": {
+    "ticket_system": "clickup",
+    "project_base": "OPS",
+    "list_id": "123456789",
+    "team_id": "123456",
+    "custom_task_ids": false,
+    "auth": {
+      "token_env": "CU_API_TOKEN"
+    }
+  },
+  "sandbox": {
+    "ticket_system": "localmock",
+    "project_base": "SBX",
+    "mock_db": "~/.ticketcli/sandbox_issues.json",
+    "me": "johndoe"
+  }
+}
