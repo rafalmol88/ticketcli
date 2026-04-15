@@ -49,7 +49,10 @@ Each entry in `targets.json` is a named target.  The `ticket_system` field selec
   "list_issues_max_results": 100,
   "auth": {
     "email_env": "JIRA_EMAIL",
-    "token_env": "JIRA_TOKEN"
+    "token_env": "JIRA_TOKEN",
+    # Alternatively, supply a Personal Access Token (PAT) via env var
+    # and set its name here. If present, `pat_env` takes precedence.
+    "pat_env": "JIRA_PAT"
   }
 }
 ```

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
 import requests
+from requests.auth import HTTPBasicAuth
 
 from ticketcli.handlers.base import TicketHandler
 from ticketcli.models import Attachment, ChangelogEntry, Comment, Issue, IssueLink, IssueListItem, Worklog
@@ -23,7 +25,45 @@ class JiraBaseHandler(TicketHandler):
         self.session.headers.update({"Accept": "application/json", "Content-Type": "application/json"})
 
     def _build_session(self, target_config: dict[str, Any]) -> requests.Session:
-        raise NotImplementedError
+        """Build a requests.Session authenticated against Jira.
+
+        Auth priority (first match wins):
+        1. ``auth.pat_env``  – Bearer token (Jira Cloud and Server/DC).
+        2. ``auth.email_env`` / ``auth.token_env``  – Basic auth (Jira Cloud).
+        3. ``auth.username_env`` / ``auth.password_env``  – Basic auth (Jira Server/DC).
+        """
+        auth = target_config.get("auth", {}) if isinstance(target_config, dict) else {}
+        if not isinstance(auth, dict):
+            auth = {}
+
+        # 1. PAT / Bearer token
+        pat_env = auth.get("pat_env")
+        if pat_env:
+            pat = os.getenv(pat_env)
+            if not pat:
+                raise ValueError(
+                    f"Jira PAT not available. Set env var '{pat_env}' for target '{self.target_name}'."
+                )
+            session = requests.Session()
+            session.headers["Authorization"] = f"Bearer {pat}"
+            return session
+
+        # 2/3. Basic auth – email+token (Cloud) or username+password (Server/DC)
+        user_env = auth.get("email_env") or auth.get("username_env")
+        pass_env = auth.get("token_env") or auth.get("password_env")
+        username = os.getenv(user_env) if user_env else None
+        password = os.getenv(pass_env) if pass_env else None
+        if username and password:
+            session = requests.Session()
+            session.auth = HTTPBasicAuth(username, password)
+            return session
+
+        raise ValueError(
+            f"Jira credentials not available for target '{self.target_name}'. "
+            f"Provide one of: auth.pat_env (Bearer token), "
+            f"auth.email_env + auth.token_env (Jira Cloud), "
+            f"or auth.username_env + auth.password_env (Jira Server/DC)."
+        )
 
     def _api_path(self, suffix: str) -> str:
         return f"/rest/api/{self.api_version}/{suffix.lstrip('/')}"
