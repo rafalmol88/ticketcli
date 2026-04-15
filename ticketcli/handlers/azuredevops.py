@@ -454,10 +454,19 @@ class AzureDevOpsHandler(TicketHandler):
         )
 
     def list_transitions(self, issue_key: str) -> list[str]:
-        """Return allowed states for the work item type from Azure DevOps process."""
+        """Return allowed states for this work item's actual type."""
         try:
-            # Use the work item type states endpoint
-            url = f"{self.base_url}/{self.project}/_apis/wit/workitemtypes/{self.work_item_type}/states"
+            wi_id = self._work_item_id(issue_key)
+            wi_resp = self._request(
+                "GET",
+                self._wit_url(f"workitems/{wi_id}"),
+                params={"fields": "System.WorkItemType"},
+            )
+            work_item_type = (
+                wi_resp.json().get("fields", {}).get("System.WorkItemType")
+                or self.work_item_type
+            )
+            url = f"{self.base_url}/{self.project}/_apis/wit/workitemtypes/{work_item_type}/states"
             response = self._request("GET", url)
             states = response.json().get("value", [])
             return [s.get("name", "") for s in states if s.get("name")]
