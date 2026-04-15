@@ -47,6 +47,8 @@ Each entry in `targets.json` is a named target.  The `ticket_system` field selec
   "project_id": "10001",
   "issue_type_name": "Task",
   "list_issues_max_results": 100,
+  "filter_labels": ["backend"],
+  "filter_components": ["Auth", "API"],
   "auth": {
     "email_env": "JIRA_EMAIL",
     "token_env": "JIRA_TOKEN",
@@ -57,6 +59,8 @@ Each entry in `targets.json` is a named target.  The `ticket_system` field selec
 }
 ```
 
+`filter_labels` and `filter_components` are optional. When set, they narrow every `ticketcli list` query to issues that carry at least one of the specified labels / belong to at least one of the specified components. They also restrict the label and component autocomplete pool to values seen on those matching issues.
+
 ### Jira Server / Data Center
 
 ```json
@@ -66,9 +70,13 @@ Each entry in `targets.json` is a named target.  The `ticket_system` field selec
   "base_url": "https://jira.example.internal",
   "project_key": "OPS",
   "issue_type_name": "Task",
+  "filter_labels": ["ops"],
+  "filter_components": ["Infrastructure"],
   "auth": {
     "username_env": "JIRA_SERVER_USER",
-    "password_env": "JIRA_SERVER_PASSWORD"
+    "password_env": "JIRA_SERVER_PASSWORD",
+    # PAT (Bearer token) is also supported:
+    "pat_env": "JIRA_SERVER_PAT"
   }
 }
 ```

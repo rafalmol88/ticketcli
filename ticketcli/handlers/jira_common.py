@@ -384,14 +384,31 @@ class JiraBaseHandler(TicketHandler):
             saved.append(target)
         return saved
     def _project_jql_clause(self) -> str:
-        """Return a JQL project clause based on target config."""
+        """Return a JQL prefix clause based on target config.
+
+        Includes the project filter and any ``filter_labels`` /
+        ``filter_components`` restrictions defined in the target config.
+        """
+        clauses: list[str] = []
+
         project_key = (
             self.target_config.get("project_key")
             or self.target_config.get("project_base")
         )
         if project_key:
-            return f'project = "{project_key}" AND '
-        return ""
+            clauses.append(f'project = "{project_key}"')
+
+        filter_labels: list[str] = self.target_config.get("filter_labels") or []
+        if filter_labels:
+            quoted = ", ".join(f'"{lbl}"' for lbl in filter_labels)
+            clauses.append(f"labels in ({quoted})")
+
+        filter_components: list[str] = self.target_config.get("filter_components") or []
+        if filter_components:
+            quoted = ", ".join(f'"{comp}"' for comp in filter_components)
+            clauses.append(f"component in ({quoted})")
+
+        return (" AND ".join(clauses) + " AND ") if clauses else ""
 
     def list_issues(self, created_by_me: bool = False, all_unresolved: bool = False) -> list[IssueListItem]:
         project_clause = self._project_jql_clause()
