@@ -144,6 +144,7 @@ class Issue:
     description: str = ""
     status: str = ""
     assignee: str = ""
+    assignees: List[str] = field(default_factory=list)
     creator: str = ""
     id: str = ""
     labels: List[str] = field(default_factory=list)
@@ -166,6 +167,7 @@ class Issue:
             assignee=data.get("assignee", ""),
             creator=data.get("creator", ""),
             id=data.get("id", ""),
+            assignees=list(data.get("assignees") or []),
             labels=list(data.get("labels") or []),
             components=list(data.get("components") or []),
             attachments=[Attachment.from_dict(a) for a in data.get("attachments", [])],
@@ -183,6 +185,7 @@ class Issue:
             "description": self.description,
             "status": self.status,
             "assignee": self.assignee,
+            "assignees": list(self.assignees),
             "creator": self.creator,
             "id": self.id,
             "labels": list(self.labels),
@@ -200,6 +203,7 @@ class IssueListItem:
     key: str
     summary: str
     assignee: Optional[str] = None
+    assignees: List[str] = field(default_factory=list)
     status: Optional[str] = None
     labels: List[str] = field(default_factory=list)
     components: List[str] = field(default_factory=list)

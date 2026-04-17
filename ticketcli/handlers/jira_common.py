@@ -297,7 +297,12 @@ class JiraBaseHandler(TicketHandler):
             labels=kwargs.get("labels"),
             components=kwargs.get("components"),
         )
-        if "assignee" in kwargs and kwargs["assignee"] is not None:
+        # Accept either assignees (list) or assignee (single); Jira only supports one
+        if "assignees" in kwargs and kwargs["assignees"] is not None:
+            assignees_list = kwargs["assignees"]
+            assignee_val = assignees_list[0] if assignees_list else None
+            fields["assignee"] = self._make_assignee_value(assignee_val)
+        elif "assignee" in kwargs and kwargs["assignee"] is not None:
             fields["assignee"] = self._make_assignee_value(kwargs["assignee"])
 
         if not fields:

@@ -4,6 +4,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote as urlquote
 
 import requests
 
@@ -106,6 +107,18 @@ class ClickUpHandler(TicketHandler):
         payload = response.json()
         return payload.get("data", []) or payload.get("time_entries", []) or []
 
+    def _parse_tags(self, raw: dict[str, Any]) -> list[str]:
+        """Extract tag names from a raw ClickUp task payload."""
+        labels: list[str] = []
+        for tag in raw.get("tags") or []:
+            if isinstance(tag, dict):
+                name = tag.get("name") or tag.get("tag_name") or ""
+                if name:
+                    labels.append(str(name))
+            elif tag:
+                labels.append(str(tag))
+        return labels
+
     def _parse_issue(self, raw: dict[str, Any], comments_raw: list[dict[str, Any]] | None = None, worklogs_raw: list[dict[str, Any]] | None = None) -> Issue:
         task_id = str(raw.get("id", ""))
         project_base = self.target_config.get("project_base")
@@ -168,11 +181,16 @@ class ClickUpHandler(TicketHandler):
                 )
             )
 
-        assignees = raw.get("assignees") or []
-        assignee = None
-        if assignees:
-            first = assignees[0] or {}
-            assignee = first.get("username") or first.get("email") or first.get("id")
+        assignees_raw = raw.get("assignees") or []
+        assignees: list[str] = []
+        for a in assignees_raw:
+            a = a or {}
+            uid = a.get("username") or a.get("email") or str(a.get("id") or "")
+            if uid:
+                assignees.append(uid)
+        assignee = assignees[0] if assignees else None
+
+        labels = self._parse_tags(raw)
 
         # Parse task dependencies / linked tasks
         links: list[IssueLink] = []
@@ -199,6 +217,8 @@ class ClickUpHandler(TicketHandler):
             description=raw.get("markdown_description") or raw.get("description") or raw.get("text_content") or "",
             status=(raw.get("status") or {}).get("status") or (raw.get("status") or {}).get("type"),
             assignee=assignee,
+            assignees=assignees,
+            labels=labels,
             attachments=attachments,
             comments=comments,
             worklogs=worklogs,
@@ -213,9 +233,18 @@ class ClickUpHandler(TicketHandler):
             "name": summary,
             "markdown_description": description,
         }
-        assignee = kwargs.get("assignee")
-        if assignee:
-            payload["assignees"] = [str(assignee)]
+
+        # Assignees: prefer explicit list, fall back to single assignee kwarg
+        desired_assignees: list[str] = [str(a) for a in (kwargs.get("assignees") or [])]
+        if not desired_assignees and kwargs.get("assignee"):
+            desired_assignees = [str(kwargs["assignee"])]
+        if desired_assignees:
+            payload["assignees"] = desired_assignees
+
+        # Labels: send as ClickUp tag objects
+        desired_labels: list[str] = [str(l) for l in (kwargs.get("labels") or [])]
+        if desired_labels:
+            payload["tags"] = [{"name": l} for l in desired_labels]
 
         response = self._request("POST", f"/list/{self.list_id}/task", json=payload)
         return self._parse_issue(response.json())
@@ -227,11 +256,62 @@ class ClickUpHandler(TicketHandler):
             payload["name"] = summary
         if description is not None:
             payload["markdown_description"] = description
-        if kwargs.get("assignee"):
-            payload["assignees"] = {"add": [str(kwargs["assignee"])]}
+
+        # --- Assignees (replace semantics via add/rem diff) ---
+        has_assignees_kwarg = "assignees" in kwargs or "assignee" in kwargs
+        if has_assignees_kwarg:
+            desired_assignees: list[str] = [str(a) for a in (kwargs.get("assignees") or [])]
+            if not desired_assignees and kwargs.get("assignee") is not None:
+                val = kwargs["assignee"]
+                if val:  # None/empty means unassign
+                    desired_assignees = [str(val)]
+
+            # Fetch current task to compute diff
+            current_raw = self._resolve_task(issue_key)
+            current_ids = {str(a.get("id") or "") for a in (current_raw.get("assignees") or []) if a}
+            desired_set = set(desired_assignees)
+            add_ids = list(desired_set - current_ids)
+            rem_ids = list(current_ids - desired_set)
+            if add_ids or rem_ids:
+                asgn: dict[str, Any] = {}
+                if add_ids:
+                    asgn["add"] = add_ids
+                if rem_ids:
+                    asgn["rem"] = rem_ids
+                payload["assignees"] = asgn
+        else:
+            current_raw = None  # will be fetched lazily for labels below
+
+        # --- Labels (add/remove diffs via per-tag endpoints) ---
+        # Resolve desired labels independently of assignees branch
+        desired_labels: list[str] | None = None
+        if "labels" in kwargs:
+            desired_labels = [str(l) for l in (kwargs["labels"] or [])]
 
         if payload:
             self._request("PUT", f"/task/{task_id}", params=self._task_query(), json=payload)
+
+        if desired_labels is not None:
+            # Fetch current task raw if not already fetched
+            if not has_assignees_kwarg:
+                current_raw = self._resolve_task(issue_key)
+            current_labels = set(self._parse_tags(current_raw))
+            desired_set_lbl = set(desired_labels)
+            to_add = desired_set_lbl - current_labels
+            to_remove = current_labels - desired_set_lbl
+            for tag_name in to_add:
+                self._request(
+                    "POST",
+                    f"/task/{task_id}/tag/{urlquote(tag_name, safe='')}",
+                    params=self._task_query(),
+                )
+            for tag_name in to_remove:
+                self._request(
+                    "DELETE",
+                    f"/task/{task_id}/tag/{urlquote(tag_name, safe='')}",
+                    params=self._task_query(),
+                )
+
         return self.get_issue_details(issue_key)
 
     def add_comment(self, issue_key: str, comment: str, **kwargs: Any) -> None:
@@ -283,6 +363,10 @@ class ClickUpHandler(TicketHandler):
         if not self.list_id:
             raise ValueError(f"Target '{self.target_name}' is missing required key: list_id")
 
+        # Resolve filter_labels from target config (case-insensitive matching)
+        filter_labels_cfg: list[str] = [str(l) for l in (self.target_config.get("filter_labels") or [])]
+        filter_labels_set: set[str] = {l.lower() for l in filter_labels_cfg}
+
         current_user_id = ""
         if not all_unresolved:
             current_user = self._fetch_current_user()
@@ -292,6 +376,10 @@ class ClickUpHandler(TicketHandler):
 
         params = self._list_payload()
         params["page"] = 0
+        # Pass server-side tag filters when configured (ClickUp supports tags[] param)
+        for lbl in filter_labels_cfg:
+            params.setdefault("tags[]", [])
+            params["tags[]"].append(lbl)
         max_pages = int(self.target_config.get("list_issues_max_pages", 10))
         results: list[IssueListItem] = []
 
@@ -306,25 +394,36 @@ class ClickUpHandler(TicketHandler):
             for raw in tasks:
                 status_obj = raw.get("status") or {}
                 status_text = (status_obj.get("status") or status_obj.get("type") or "").strip().lower()
-                assignees = raw.get("assignees") or []
+                assignees_raw = raw.get("assignees") or []
                 creator = raw.get("creator") or {}
 
                 if status_text in {"closed", "complete", "completed", "done", "resolved"}:
                     continue
+
+                # Parse task labels for client-side filtering (safety net) and output
+                task_labels = self._parse_tags(raw)
+                if filter_labels_set:
+                    task_label_names = {l.lower() for l in task_labels}
+                    if not filter_labels_set.intersection(task_label_names):
+                        continue
 
                 if created_by_me:
                     creator_id = str(creator.get("id", "")).strip()
                     if creator_id != current_user_id:
                         continue
                 elif not all_unresolved:
-                    assignee_ids = {str((assignee or {}).get("id", "")).strip() for assignee in assignees}
+                    assignee_ids = {str((a or {}).get("id", "")).strip() for a in assignees_raw}
                     if current_user_id not in assignee_ids:
                         continue
 
-                assignee_text = None
-                if assignees:
-                    first = assignees[0] or {}
-                    assignee_text = first.get("username") or first.get("email") or first.get("id")
+                # Build assignees list
+                task_assignees: list[str] = []
+                for a in assignees_raw:
+                    a = a or {}
+                    uid = a.get("username") or a.get("email") or str(a.get("id") or "")
+                    if uid:
+                        task_assignees.append(uid)
+                assignee_text = task_assignees[0] if task_assignees else None
 
                 task_id = str(raw.get("id", ""))
                 project_base = self.target_config.get("project_base")
@@ -335,7 +434,9 @@ class ClickUpHandler(TicketHandler):
                         key=key,
                         summary=raw.get("name", ""),
                         assignee=assignee_text,
+                        assignees=task_assignees,
                         status=(raw.get("status") or {}).get("status") or (raw.get("status") or {}).get("type"),
+                        labels=task_labels,
                     )
                 )
 

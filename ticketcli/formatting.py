@@ -48,11 +48,15 @@ def _visible_comments(comments: list[Comment]) -> list[Comment]:
 
 
 def render_issue(issue: Issue, target_name: str | None = None) -> str:
+    # Show every assignee when the backend exposes multiple; fall back to single assignee
+    _all_assignees = issue.assignees if issue.assignees else ([issue.assignee] if issue.assignee else [])
+    assignee_line = f"Assignees: {', '.join(_all_assignees)}" if _all_assignees else "Assignee: -"
+
     lines = [
         f"Key: {issue.key}",
         f"Summary: {issue.summary}",
         f"Status: {issue.status or '-'}",
-        f"Assignee: {issue.assignee or '-'}",
+        assignee_line,
         f"Labels: {', '.join(issue.labels) if issue.labels else '-'}",
         f"Components: {', '.join(issue.components) if issue.components else '-'}",
         "",

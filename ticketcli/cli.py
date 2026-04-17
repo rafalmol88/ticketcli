@@ -312,11 +312,33 @@ def _serialize_issues_for_cache(issues) -> list[dict[str, str]]:
 
 def _list_issues_for_completion(parsed_args) -> list[dict[str, str]]:
     cache_key = _issue_cache_key(parsed_args)
-    cached = load_cache("issues", cache_key, ISSUE_CACHE_TTL_SECONDS)
-    if isinstance(cached, list):
-        return [item for item in cached if isinstance(item, dict)]
 
     handler = _resolve_handler_for_completion(parsed_args)
+
+    # Determine effective filter config for the current target
+    _tc = getattr(handler, "target_config", {}) or {}
+    current_filter_labels: list[str] = sorted(str(l) for l in (_tc.get("filter_labels") or []))
+    current_filter_components: list[str] = sorted(str(c) for c in (_tc.get("filter_components") or []))
+
+    cached = load_cache("issues", cache_key, ISSUE_CACHE_TTL_SECONDS)
+
+    # Validate cached data against current filter metadata
+    use_cached = False
+    cached_issues: list[dict] = []
+    if isinstance(cached, dict) and "issues" in cached:
+        cached_fl = sorted(str(l) for l in (cached.get("filter_labels") or []))
+        cached_fc = sorted(str(c) for c in (cached.get("filter_components") or []))
+        if cached_fl == current_filter_labels and cached_fc == current_filter_components:
+            use_cached = True
+            cached_issues = [item for item in cached["issues"] if isinstance(item, dict)]
+    elif isinstance(cached, list) and not current_filter_labels and not current_filter_components:
+        # Backward-compatible plain list (no filters in use)
+        use_cached = True
+        cached_issues = [item for item in cached if isinstance(item, dict)]
+
+    if use_cached:
+        return cached_issues
+
     if handler is None:
         return []
 
@@ -333,7 +355,11 @@ def _list_issues_for_completion(parsed_args) -> list[dict[str, str]]:
         return []
 
     serialized = _serialize_issues_for_cache(issues)
-    save_cache("issues", cache_key, serialized)
+    save_cache("issues", cache_key, {
+        "issues": serialized,
+        "filter_labels": current_filter_labels,
+        "filter_components": current_filter_components,
+    })
     return serialized
 
 
@@ -672,23 +698,33 @@ def _run_assign(args: argparse.Namespace) -> None:
     issue_key = coerce_issue_ref(handler, args.issue)
     current = handler.get_issue_details(issue_key)
 
-    assignee_arg = getattr(args, "assignee", None)
-    assignee_interactive = getattr(args, "assignee_interactive", False)
     unassign = getattr(args, "unassign", False)
+    assignee_arg = getattr(args, "assignee", None)
 
-    interactive = (assignee_interactive or assignee_arg is None) and not unassign
-    new_assignee = _resolve_edit_assignee(
-        handler=handler,
-        assignee_arg=assignee_arg,
-        interactive=interactive,
-        unassign=unassign,
-    )
+    if unassign:
+        new_assignees: list[str] = []
+    elif assignee_arg is not None:
+        # Non-interactive: resolve the single provided name to a system ID
+        resolved = handler.resolve_assignee(assignee_arg)
+        if resolved is None:
+            print(f"No changes for issue: {issue_key}")
+            return
+        new_assignees = [resolved]
+    else:
+        # Interactive: checkbox multi-select pre-seeded with current assignees
+        current_ids = current.assignees if current.assignees else ([current.assignee] if current.assignee else [])
+        new_assignees = handler.resolve_assignees(current_system_ids=current_ids)
+        if new_assignees is None:
+            print(f"No changes for issue: {issue_key}")
+            return
 
-    if new_assignee is UNCHANGED or _values_equal(new_assignee, current.assignee):
+    # Detect no-op
+    current_set = set(current.assignees) if current.assignees else ({current.assignee} if current.assignee else set())
+    if set(new_assignees) == current_set:
         print(f"No changes for issue: {issue_key}")
         return
 
-    issue = handler.edit_issue(issue_key, assignee=new_assignee)
+    issue = handler.edit_issue(issue_key, assignees=new_assignees)
     _invalidate_target_completion_caches(target_name)
     print(f"Updated issue: {issue.key}")
 

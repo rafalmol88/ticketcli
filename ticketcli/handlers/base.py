@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from ticketcli.models import Issue, IssueListItem, ChangelogEntry
-from ticketcli.utils.user_select import choose_mapped_user_interactively
+from ticketcli.utils.user_select import choose_mapped_user_interactively, choose_mapped_users_interactively
 
 
 class TicketHandler(ABC):
@@ -58,6 +58,18 @@ class TicketHandler(ABC):
             print(f"Unknown assignee: {name}")
 
         return choose_mapped_user_interactively(mapping, initial_query=name)
+
+    def resolve_assignees(self, current_system_ids: list[str] | None = None) -> list[str] | None:
+        """Interactively select zero or more assignees via a checkbox prompt.
+
+        Pre-checks entries matching *current_system_ids*.
+        Returns the selected list of system IDs, or ``None`` if cancelled.
+        """
+        mapping = self.available_user_mappings()
+        if not mapping:
+            print("No user mappings configured.")
+            return None
+        return choose_mapped_users_interactively(mapping, current_system_ids=current_system_ids)
 
     @abstractmethod
     def create_issue(self, summary: str, description: str, **kwargs: Any):
