@@ -282,7 +282,7 @@ class JiraBaseHandler(TicketHandler):
                 description=description,
                 assignee=kwargs.get("assignee"),
                 labels=kwargs.get("labels"),
-                components=kwargs.get("components"),
+                components=self.target_config.get("filter_components"),
             ),
         }
         response = self._request("POST", self._api_path("issue"), json={"fields": fields})
@@ -295,7 +295,7 @@ class JiraBaseHandler(TicketHandler):
             summary=summary,
             description=description,
             labels=kwargs.get("labels"),
-            components=kwargs.get("components"),
+            components=self.target_config.get("filter_components"),
         )
         # Accept either assignees (list) or assignee (single); Jira only supports one
         if "assignees" in kwargs and kwargs["assignees"] is not None:
