@@ -55,20 +55,28 @@ class LocalMockHandler(TicketHandler):
     def _from_raw(self, raw: dict[str, Any]) -> Issue:
         return Issue.from_dict(raw)
 
-    def create_issue(self, summary: str, description: str = "", assignee: str | None = None) -> Issue:
+    def create_issue(self, summary: str, description: str = "", assignee: str | None = None, **kwargs: Any) -> Issue:
         issues = self._load_issues()
         me = resolve_me(self.target_name, self.target_config)
 
         issue_number = len(issues) + 1
         key = f"{self.target_config.get('project_base', 'MOCK')}-{issue_number}"
 
+        labels = list(kwargs.get("labels") or [])
+        components = list(kwargs.get("components") or [])
+        assignees = list(kwargs.get("assignees") or [])
+        assignee_final = assignee or (assignees[0] if assignees else me)
+
         issue = Issue(
             key=key,
             summary=summary,
             description=description,
             status="Open",
-            assignee=assignee or me,
+            assignee=assignee_final,
+            assignees=assignees,
             creator=me,
+            labels=labels,
+            components=components,
             attachments=[],
             comments=[],
             worklogs=[],
