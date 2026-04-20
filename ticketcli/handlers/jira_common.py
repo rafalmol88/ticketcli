@@ -22,7 +22,11 @@ class JiraBaseHandler(TicketHandler):
             raise ValueError(f"Target '{target_name}' is missing required key: base_url")
         self.timeout = int(target_config.get("timeout_seconds", 60))
         self.session = self._build_session(target_config)
-        self.session.headers.update({"Accept": "application/json", "Content-Type": "application/json"})
+        # Only set Accept globally; Content-Type is set per-request by
+        # the requests library (e.g. when using `json=` or `files=`).
+        # A global Content-Type header can cause some Jira endpoints to
+        # respond with HTTP 406 Not Acceptable.
+        self.session.headers.update({"Accept": "application/json"})
 
     def _build_session(self, target_config: dict[str, Any]) -> requests.Session:
         """Build a requests.Session authenticated against Jira.
@@ -322,7 +326,6 @@ class JiraBaseHandler(TicketHandler):
             self._api_path(f"issue/{key}"),
             params={
                 "fields": "summary,description,status,assignee,attachment,comment,worklog,labels,components,issuelinks",
-                "expand": "renderedFields",
             },
         )
         return self._parse_issue(response.json())
@@ -335,7 +338,7 @@ class JiraBaseHandler(TicketHandler):
             self._api_path(f"issue/{key}"),
             params={
                 "fields": "summary,description,status,assignee,attachment,comment,worklog,labels,components,issuelinks",
-                "expand": "renderedFields,changelog",
+                "expand": "changelog",
             },
         )
         return self._parse_issue(response.json())
@@ -425,11 +428,11 @@ class JiraBaseHandler(TicketHandler):
             jql = f'{project_clause}assignee = currentUser() AND resolution = Unresolved ORDER BY updated DESC'
 
         response = self._request(
-            "GET",
+            "POST",
             self._api_path("search"),
-            params={
+            json={
                 "jql": jql,
-                "fields": "summary,assignee,status,labels,components",
+                "fields": ["summary", "assignee", "status", "labels", "components"],
                 "maxResults": int(self.target_config.get("list_issues_max_results", 100)),
             },
         )
