@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 
 import argcomplete
 
-from ticketcli.cli_common import coerce_issue_ref, ensure_output_dir, resolve_runtime
+from ticketcli.cli_common import ensure_output_dir, resolve_runtime
 from ticketcli.completion_cache import invalidate_all, invalidate_cache, load_cache, save_cache
 from ticketcli.config import ConfigError, load_config, load_targets, load_user_mappings, resolve_target, save_targets, set_default_target
 from ticketcli.formatting import render_issue, _human_date
@@ -87,6 +87,65 @@ def _invalidate_target_completion_caches(target_name: str | None) -> None:
     invalidate_cache("users", f"{target_name}__users")
     invalidate_cache("labels", f"{target_name}__labels")
     invalidate_cache("components", f"{target_name}__components")
+
+
+def resolve_issue_ref(handler, issue_ref: str) -> str:
+    """Resolve an issue reference to a canonical key.
+
+    Accepts:
+    - A full key like ``ABC-123``
+    - A bare number like ``42`` (expanded using the target's project_base)
+    - A summary substring, looked up against the local completion cache
+
+    When a summary substring matches multiple issues the user is prompted to
+    pick one interactively.
+    """
+    ref = str(issue_ref).strip()
+
+    # Fast path: looks like a key or bare number — skip cache lookup
+    if re.match(r'^[A-Za-z]+-\d+$', ref) or ref.isdigit():
+        return handler.normalize_issue_key(ref)
+
+    # Slow path: substring match against cached summaries
+    cache_key = f"{handler.target_name}__all_unresolved"
+    cached = load_cache("issues", cache_key, ISSUE_CACHE_TTL_SECONDS)
+    issues: list[dict] = []
+    if isinstance(cached, dict) and "issues" in cached:
+        issues = [i for i in cached["issues"] if isinstance(i, dict)]
+    elif isinstance(cached, list):
+        issues = [i for i in cached if isinstance(i, dict)]
+
+    if not issues:
+        # Cache cold — fetch live and populate it
+        try:
+            fetched = handler.list_issues(all_unresolved=True)
+        except Exception as exc:
+            raise SystemExit(f"Could not fetch issues for target '{handler.target_name}': {exc}") from exc
+        issues = _serialize_issues_for_cache(fetched)
+        save_cache("issues", cache_key, {"issues": issues, "filter_labels": [], "filter_components": []})
+
+    q = ref.lower()
+    matches = [i for i in issues if q in (i.get("summary") or "").lower()]
+
+    if not matches:
+        if not issues:
+            raise SystemExit(
+                f"No issues found in local cache for target '{handler.target_name}'. "
+                f"Run 'ticketcli list -a' first to populate the cache, then retry."
+            )
+        raise SystemExit(
+            f"No issues matching '{ref}' found for target '{handler.target_name}'."
+        )
+
+    if len(matches) == 1:
+        return str(matches[0]["key"])
+
+    # Multiple matches: let the user pick
+    labels = [f"{i.get('key', '?')} | {i.get('summary', '')}" for i in matches]
+    chosen = choose_indices_interactively(labels, f'Multiple issues match "{ref}", select one')
+    if not chosen:
+        raise SystemExit("No issue selected.")
+    return str(matches[chosen[0]]["key"])
 
 
 def _transition_cache_key(target_name: str) -> str:
@@ -642,7 +701,7 @@ def _run_pin_interactive(handler, issue_key: str, issue) -> None:
 
 def _run_edit(args: argparse.Namespace) -> None:
     config, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     current = handler.get_issue_details(issue_key)
 
     # --pin mode: interactive pin/unpin of comments
@@ -695,7 +754,7 @@ def _run_edit(args: argparse.Namespace) -> None:
 
 def _run_assign(args: argparse.Namespace) -> None:
     _, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     current = handler.get_issue_details(issue_key)
 
     unassign = getattr(args, "unassign", False)
@@ -731,7 +790,7 @@ def _run_assign(args: argparse.Namespace) -> None:
 
 def _run_comment(args: argparse.Namespace) -> None:
     config, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
 
     # Fetch issue once — reuse status for the in-progress suggestion
     issue = handler.get_issue_details(issue_key)
@@ -753,7 +812,7 @@ def _run_comment(args: argparse.Namespace) -> None:
 
 def _run_show(args: argparse.Namespace) -> None:
     _, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     issue = handler.get_issue_details(issue_key)
     if getattr(args, "format", "plain") == "json":
         print(json_module.dumps(issue.to_dict(), indent=2, ensure_ascii=False))
@@ -763,7 +822,7 @@ def _run_show(args: argparse.Namespace) -> None:
 
 def _run_attachments(args: argparse.Namespace) -> None:
     _, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     issue = handler.get_issue_details(issue_key)
     names = [f"{a.id}: {a.name}" for a in issue.attachments]
     indices = choose_indices_interactively(names, "Select attachments")
@@ -852,7 +911,7 @@ def _run_migrate(args: argparse.Namespace) -> None:
         source_issues_list = source_handler.list_issues(all_unresolved=True)
         keys_to_migrate = [item.key for item in source_issues_list]
     else:
-        keys_to_migrate = [coerce_issue_ref(source_handler, args.issue)]
+        keys_to_migrate = [resolve_issue_ref(source_handler, args.issue)]
 
     if not keys_to_migrate:
         print("No issues to migrate.")
@@ -1000,7 +1059,7 @@ def _run_upload(args: argparse.Namespace) -> None:
     from pathlib import Path
 
     _, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     file_path = Path(args.file)
     if not file_path.is_file():
         raise SystemExit(f"File not found: {file_path}")
@@ -1016,7 +1075,7 @@ def _run_upload(args: argparse.Namespace) -> None:
 
 def _run_delete_attachment(args: argparse.Namespace) -> None:
     _, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     attachment_id = args.attachment_id
     handler.delete_attachment(issue_key, attachment_id)
     _invalidate_target_completion_caches(target_name)
@@ -1025,7 +1084,7 @@ def _run_delete_attachment(args: argparse.Namespace) -> None:
 
 def _run_status(args: argparse.Namespace) -> None:
     _, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     handler.transition_issue(issue_key, args.status)
     _invalidate_target_completion_caches(target_name)
     print(f"Transitioned {issue_key} to '{args.status}'")
@@ -1033,7 +1092,7 @@ def _run_status(args: argparse.Namespace) -> None:
 
 def _run_close(args: argparse.Namespace) -> None:
     _, target_name, _, handler = resolve_runtime(args)
-    issue_key = coerce_issue_ref(handler, args.issue)
+    issue_key = resolve_issue_ref(handler, args.issue)
     target_status = _resolve_close_status(handler, target_name, issue_key, args.status)
     handler.transition_issue(issue_key, target_status)
     _invalidate_target_completion_caches(target_name)
